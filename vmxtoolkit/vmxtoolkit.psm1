@@ -1,21 +1,64 @@
-<#
-    .SYNOPSIS
-    Get-VMwareversion
-    .DESCRIPTION
-        Displays version Information on installed VMware version
-    .EXAMPLE
-        PS C:\> Get-VMwareversion
-    .NOTES
-        requires VMXtoolkit loaded
-#>
 
+
+
+function Start-ProcessCapture
+{
+    [CmdletBinding()]
+    param
+    (
+        [string]$filePath,
+        [string]$argumentList,
+        [switch]$wait
+    )
+
+    if ((!$filePath) -or ((!(Test-Path "C:\Windows\System32\$filePath")) -and (!(Test-Path $filePath))))
+    {
+        $Object = New-Object PSObject -Property @{
+            ExitCode    = 1
+            Output      = "Error: Invalid path supplied - $filePath"
+        }
+        return $Object
+    }
+    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+    $pinfo.FileName = $filePath
+    $pinfo.RedirectStandardError = $true
+    $pinfo.RedirectStandardOutput = $true
+    $pinfo.UseShellExecute = $false
+    $pinfo.Arguments = $argumentList
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $pinfo
+
+    try
+    {
+        $p.Start() | Out-Null
+        if ($wait)
+        {
+            $p.WaitForExit()
+            return (New-Object PSObject -Property @{ ExitCode = $p.ExitCode; Output = $p.StandardOutput.ReadToEnd() })
+        }
+        else  { return (New-Object PSObject -Property @{ ExitCode = 0; Output = "Process started without error" }) }
+    }
+    catch  { return (New-Object PSObject -Property @{ ExitCode = 1; Output = "Error: $($_.Exception.Message)" }) }
+}
+
+function create-ErrorObject
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(ValueFromPipeline)] [string]$errorReason
+    )
+
+    $Object = New-Object PSObject -Property @{
+        ExitCode    = 1
+        Output      = $errorReason
+    }
+    return $Object
+}
 
 function Get-yesno
 {
-    [CmdletBinding(DefaultParameterSetName='Parameter Set 1',
-                  PositionalBinding=$false,
-                  HelpUri = 'http://labbuildr.com/',
-                  ConfirmImpact='Medium')]
+    [CmdletBinding(DefaultParameterSetName='Parameter Set 1', PositionalBinding=$false, HelpUri = 'http://labbuildr.com/', ConfirmImpact='Medium')]
     Param
     (
         $title = "Delete Files",
@@ -31,8 +74,35 @@ function Get-yesno
     return ($result)
 }
 
+function Get-yesnoabort
+{
+    [CmdletBinding(DefaultParameterSetName='Parameter Set 1', PositionalBinding=$false, HelpUri = 'http://labbuildr.com/', ConfirmImpact='Medium')]
+    Param
+    (
+        $title = "Delete Files",
+        $message = "Do you want to delete the remaining files in the folder?",
+        $Yestext = "Yes",
+        $Notext = "No",
+        $AbortText = "Abort"
+    )
+    $yes = New-Object System.Management.Automation.Host.ChoiceDescription ("&Yes","$Yestext")
+    $no = New-Object System.Management.Automation.Host.ChoiceDescription "&No","$Notext"
+    $abort = New-Object System.Management.Automation.Host.ChoiceDescription "&Abort","$Aborttext"
+    $options = [System.Management.Automation.Host.ChoiceDescription[]]($yes, $no, $Abort )
+    $result = $host.ui.PromptForChoice($title, $message, $options, 0)
+    return ($result)
+}
 
-
+<#
+    .SYNOPSIS
+    Get-VMwareversion
+    .DESCRIPTION
+        Displays version Information on installed VMware version
+    .EXAMPLE
+        PS C:\> Get-VMwareversion
+    .NOTES
+        requires VMXtoolkit loaded
+#>
 function Get-VMwareVersion
 {
     [CmdletBinding(HelpUri = "http://labbuildr.bottnet.de/modules/get-vmwareversion/")]
@@ -40,28 +110,6 @@ function Get-VMwareVersion
     begin { }
     process { }
     end { Write-Output $vmwareversion }
-}
-
-function Get-yesnoabort
-{
-    [CmdletBinding(DefaultParameterSetName='Parameter Set 1',
-                  PositionalBinding=$false,
-                  HelpUri = 'http://labbuildr.com/',
-                  ConfirmImpact='Medium')]
-    Param
-        (
-        $title = "Delete Files",
-        $message = "Do you want to delete the remaining files in the folder?",
-        $Yestext = "Yes",
-        $Notext = "No",
-        $AbortText = "Abort"
-        )
-    $yes = New-Object System.Management.Automation.Host.ChoiceDescription ("&Yes","$Yestext")
-    $no = New-Object System.Management.Automation.Host.ChoiceDescription "&No","$Notext"
-    $abort = New-Object System.Management.Automation.Host.ChoiceDescription "&Abort","$Aborttext"
-    $options = [System.Management.Automation.Host.ChoiceDescription[]]($yes, $no, $Abort )
-    $result = $host.ui.PromptForChoice($title, $message, $options, 0)
-    return ($result)
 }
 
 <#
@@ -152,23 +200,53 @@ function Get-VMXHWVersion
     {
         switch ($PsCmdlet.ParameterSetName)
         {
-            "1"
-            { $vmxconfig = Get-VMXConfig -VMXName $VMXname }
-            "2"
-            { $vmxconfig = Get-VMXConfig -config $config }
+            "1"  { $vmxconfig = Get-VMXConfig -VMXName $VMXname }
+            "2"  { $vmxconfig = Get-VMXConfig -config $config }
         }
         $ObjectType = "HWversion"
         $ErrorActionPreference = "silentlyContinue"
         Write-Verbose -Message "getting $ObjectType"
         $patterntype = "virtualHW.version"
-        $Value = Search-VMXPattern -Pattern "$patterntype" -vmxconfig $vmxconfig -value "HWVersion" -patterntype $patterntype
+        $Value = Search-VMXPattern -Pattern "$patterntype" -vmxconfig $vmxconfig -value $ObjectType -patterntype $patterntype
         $Object = New-Object -TypeName psobject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
-        $Object | Add-Member -MemberType NoteProperty -Name $ObjectType -Value $Value.HWVersion
+        $Object | Add-Member -MemberType NoteProperty -Name $ObjectType -Value $Value.$ObjectType
         Write-Output $Object
     }
     end { }
+}
 
+function Get-VMXHWVersionString
+{
+    [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/get-VMXHWVersion/")]
+    param (
+        #[Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]
+        [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
+        [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)]$config
+        #[Parameter(ParameterSetName = "3", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$vmxconfig
+    )
+    begin { }
+    process
+    {
+        Write-Verbose "$($MyInvocation.MyCommand): ParameterSetName - $($PsCmdlet.ParameterSetName)"
+        switch ($PsCmdlet.ParameterSetName)
+        {
+            "1"  { $config = (Get-VMX -VMXName $VMXname).config }
+            #"2"  { $vmxconfig = Get-VMXConfig -config $config }
+        }
+        #$ObjectType = "HWversion"
+        $ErrorActionPreference = "silentlyContinue"
+        #Write-Verbose -Message "getting $ObjectType"
+        $patterntype = "virtualHW.version"
+        #$Value = Search-VMXPattern -Pattern "$patterntype" -vmxconfig $vmxconfig -value $patterntype -patterntype $patterntype
+        $value = Get-VMXParameter -VMXConfigPath $config -paramName $patterntype
+        return $value.$patterntype
+        #$Object = New-Object -TypeName psobject
+        #$Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
+        #$Object | Add-Member -MemberType NoteProperty -Name $ObjectType -Value $Value.$ObjectType
+        #Write-Output $Object
+    }
+    end { }
 }
 
 
@@ -280,7 +358,7 @@ function Set-VMXAnnotation
             {}
         }
 
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             $VMXConfig = Get-VMXConfig -config $config
             $VMXConfig = $VMXConfig | Where-Object {$_ -NotMatch "annotation"}
@@ -398,7 +476,7 @@ function Get-VMXConfigVersion
         Shrinks the VMS Disk File
 
     .EXAMPLE
-        get-vmx test | get-vmxscsidisk | Resize-VMXDiskfile
+        Get-VMX test | get-vmxscsidisk | Resize-VMXDiskfile
 
     .NOTES
         requires VMXtoolkit loaded
@@ -443,7 +521,7 @@ function Expand-VMXDiskfile
         Shrinks the VMS Disk File
 
     .EXAMPLE
-        get-vmx test | get-vmxscsidisk | Resize-VMXDiskfile
+        Get-VMX test | get-vmxscsidisk | Resize-VMXDiskfile
 
     .NOTES
         requires VMXtoolkit loaded
@@ -486,7 +564,7 @@ function Resize-VMXDiskfile
         Shrinks the VMS Disk File
 
     .EXAMPLE
-        get-vmx test | get-vmxscsidisk | Optimize-VMXDisk
+        Get-VMX test | get-vmxscsidisk | Optimize-VMXDisk
 
     .NOTES
         requires VMXtoolkit loaded
@@ -1107,7 +1185,7 @@ function Set-VMXScsiController
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $content = Get-VMXConfig -config $config
             $Content = $content -notmatch "scsi$SCSIController.present"
@@ -1132,7 +1210,7 @@ function Set-VMXScsiController
 
 <#
     .SYNOPSIS
-        A brief description of the Search-VMXPattern function.
+        Searches vmx config file for a pattern
 
     .DESCRIPTION
         A detailed description of the Search-VMXPattern function.
@@ -1163,15 +1241,15 @@ function Search-VMXPattern
     param($pattern,$vmxconfig,$name,$value,$patterntype,[switch]$nospace)
 
     $getpattern = $vmxconfig| Where-Object {$_ -match $pattern}
-    Write-Verbose "Patterncount : $getpattern.count"
-    Write-Verbose "Patterntype : $patterntype"
+    Write-Verbose "$($MyInvocation.MyCommand): Patterncount : $getpattern.count"
+    Write-Verbose "$($MyInvocation.MyCommand): Patterntype : $patterntype"
     foreach ($returnpattern in $getpattern)
     {
-        Write-Verbose "returnpattern : $returnpattern"
+        Write-Verbose "$($MyInvocation.MyCommand): returnpattern : $returnpattern"
         $returnpattern = $returnpattern.Replace('"', '')
         if ($nospace.IsPresent)
         {
-            Write-Verbose "Clearing Spaces"
+            Write-Verbose "$($MyInvocation.MyCommand): Clearing Spaces"
             $returnpattern = $returnpattern.Replace(' ', '')
             $returnpattern = $returnpattern.split("=")
         }
@@ -1179,20 +1257,51 @@ function Search-VMXPattern
         {
             $returnpattern = $returnpattern.split(" = ")
         }
-        Write-Verbose "returnpattern: $returnpattern"
-        Write-Verbose $returnpattern.count
+        Write-Verbose "$($MyInvocation.MyCommand): returnpattern: $returnpattern"
+        Write-Verbose "$($MyInvocation.MyCommand): $returnpattern.count"
         $nameobject = $returnpattern[0]
-        Write-Verbose "nameobject fro returnpattern $nameobject "
+        Write-Verbose "$($MyInvocation.MyCommand): nameobject for returnpattern $nameobject "
         $nameobject = $nameobject.Replace($patterntype,"")
         $valueobject  = ($returnpattern[$returnpattern.count-1])
-        Write-Verbose "Search returned Nameobject: $nameobject"
-        Write-Verbose "Search returned Valueobject: $valueobject"
+        Write-Verbose "$($MyInvocation.MyCommand): Search returned Nameobject: $nameobject"
+        Write-Verbose "$($MyInvocation.MyCommand): Search returned Valueobject: $valueobject"
         $Object = New-Object psobject
         if ($name) {$Object | Add-Member -MemberType NoteProperty -Name $name -Value $nameobject}
         $Object | Add-Member -MemberType NoteProperty -Name $value -Value $valueobject
         Write-Output $Object
     } #end foreach
 } #end search-pattern
+
+function Get-VMXParameter
+{
+    param ($VMXConfigPath, $paramName, [switch]$nospace)
+
+    if (!(Test-Path $VMXConfigPath))  { Write-Verbose "$($MyInvocation.MyCommand): Invalid file path supplied: $VMXConfigPath"; return $false }
+    if (!$paramName)                  { Write-Verbose "$($MyInvocation.MyCommand): No parameter name supplied"; return $false }
+    $VMXConfigContent = (Get-Content -path $VMXConfigPath)
+    $errorFound = $false
+
+    $configLine = $VMXConfigContent | Where-Object {$_ -match $paramName}
+
+    if ($configLine.Count -lt 1)      { Write-Verbose "$($MyInvocation.MyCommand): Param $paramName not found in $VMXConfigPath"; return $false }
+    elseif ($configLine.Count -gt 1)  { Write-Verbose "$($MyInvocation.MyCommand): Multiple lines matching Param $paramName found in $VMXConfigPath, cannot continue"; return $false }
+    else
+    {
+        Write-Verbose "$($MyInvocation.MyCommand): Found line matching $paramName, extracting parameter value"
+        $a,$b = $configLine.split("=")
+        $b = $b -join "="
+        if ($a -match $paramName)
+        {
+            $b = ($b.Trim()).Trim('"')
+            Write-Verbose "$($MyInvocation.MyCommand): Parameter value is $b"
+            return (New-Object PSObject -Property @{ $paramName = $b } )
+        }
+        else
+        {
+            Write-Verbose "$($MyInvocation.MyCommand): Issue getting param value for $paramName, got $a = $b"
+        }
+    }
+}
 
 <#
     .SYNOPSIS
@@ -1218,19 +1327,19 @@ function Get-VMXConfig
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXConfig/")]
     param
     (
-
-        [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
-        [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
-        [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $true)][ValidateScript({ Test-Path -Path $_ })]$Path,
+        #[Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
+        [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
+        #[Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $true)][ValidateScript({ Test-Path -Path $_ })]$Path,
         [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)]$config
     )
-    
+
     begin
     {
+        Write-Verbose "$($MyInvocation.MyCommand): ParameterSetName - $($PsCmdlet.ParameterSetName)"
         switch ($PsCmdlet.ParameterSetName)
         {
-            "1"
-            { $config = "$path\$VMXname.vmx" }
+            "1"  { $config = (Get-VMX -VMXName $VMXname).config }
+            #"2"  { }
         }
     }
     process
@@ -1317,10 +1426,8 @@ function Get-VMXNetworkAddress
     {
         switch ($PsCmdlet.ParameterSetName)
         {
-            "1"
-            { $vmxconfig = Get-VMXConfig -VMXName $VMXName }
-            "2"
-            { $vmxconfig = Get-VMXConfig -config $config }
+            "1"  { $vmxconfig = Get-VMXConfig -VMXName $VMXName }
+            "2"  { $vmxconfig = Get-VMXConfig -config $config }
         }
         $ObjectType = "NetworkAdapter"
         $patterntype = ".generatedAddress"
@@ -1620,7 +1727,7 @@ function Set-VMXNetAdapterDisplayName
     }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
         $Displayname = $DisplayName.replace(" ","_")
         $Content = Get-Content $config | Where-Object{ $_ -ne "" }
@@ -1804,7 +1911,7 @@ function Set-VMXDisplayName
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Displayname = $DisplayName.replace(" ", "_")
             $Content = Get-Content $config | Where-Object { $_ -ne "" }
@@ -2106,7 +2213,7 @@ function Set-VMXGuestOS
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             Write-Host -ForegroundColor Gray " ==>setting GuestOS $GuestOS for " -NoNewline
             Write-Host -ForegroundColor Magenta $vmxname -NoNewline
@@ -2167,7 +2274,7 @@ function Set-VMXVTBit
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             Write-Host -ForegroundColor Gray " ==>setting Virtual VTbit to $($VTBit.IsPresent.ToString()) for " -NoNewline
             Write-Host -ForegroundColor Magenta $vmxname -NoNewline
@@ -2210,7 +2317,7 @@ function Set-VMXnestedHVEnabled
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             Write-Host -ForegroundColor Gray " ==>setting Virtual VTbit to $($VTBit.IsPresent.ToString()) for " -NoNewline
             Write-Host -ForegroundColor Magenta $vmxname -NoNewline
@@ -2250,7 +2357,7 @@ function Set-VMXUUID
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Content = Get-Content $config | Where-Object { $_ -ne "" }
             $Content = $content | Where-Object { $_ -NotMatch "uuid.bios" }
@@ -2313,7 +2420,7 @@ function Set-VMXSharedFolderState
                 Write-Verbose "enabling Shared Folder State for $config"
                 do
                 {
-                    $cmdresult = &$vmrun enableSharedFolders $config
+                    $cmdresult = & $vmrun enableSharedFolders $config
                 }
                 until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
                 $Object | Add-Member -MemberType 'NoteProperty' -Name State -Value "enabled"
@@ -2325,7 +2432,7 @@ function Set-VMXSharedFolderState
                 Write-Verbose "Disabling Shared Folder State for $config"
                 do
                 {
-                    $cmdresult = &$vmrun disableSharedFolders $config
+                    $cmdresult = & $vmrun disableSharedFolders $config
                 }
                 until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
                 $Object | Add-Member -MemberType 'NoteProperty' -Name State -Value "disabled"
@@ -2397,7 +2504,7 @@ function Set-VMXSharedFolder
                 Write-Verbose "adding Share $Sharename for Folder $Folder for $config"
                 do
                 {
-                    $cmdresult = &$vmrun addSharedFolder $config $Sharename $Folder
+                    $cmdresult = & $vmrun addSharedFolder $config $Sharename $Folder
                 }
                 until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
                 $Object | Add-Member -MemberType 'NoteProperty' -Name Share -Value $Sharename
@@ -2410,7 +2517,7 @@ function Set-VMXSharedFolder
                 Write-Verbose "removing Shared Folder for $config"
                 do
                 {
-                    $cmdresult = &$vmrun removeSharedFolder $config $Sharename
+                    $cmdresult = & $vmrun removeSharedFolder $config $Sharename
                 }
                 until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
                 $Object | Add-Member -MemberType 'NoteProperty' -Name Sharename -Value "removed"
@@ -2455,10 +2562,9 @@ function Get-VMXUUID
         }
         $ObjectType = "UUID"
         $ErrorActionPreference = "silentlyContinue"
-        Write-Verbose -Message "getting $ObjectType"
+        Write-Verbose "getting $ObjectType"
         $patterntype = ".bios"
-        $Value = Search-VMXPattern  -Pattern "uuid.bios" -vmxconfig $vmxconfig -Name "Type" -value $ObjectType -patterntype $patterntype -nospace
-        # $Value = Search-VMXPattern -Pattern "ethernet\d{1,2}.virtualdev" -vmxconfig $vmxconfig -name "Adapter" -value "Type" -patterntype $patterntype
+        $Value = Search-VMXPattern -Pattern "uuid.bios" -vmxconfig $vmxconfig -Name "Type" -value $ObjectType -patterntype $patterntype -nospace
         if ($unityformat.ispresent)
         {
             $out_uuid = $Value.uuid.Insert(8,"-")
@@ -2495,29 +2601,27 @@ function Get-VMXRun
 {
     $runvms = @()
 
-    $Origin = $MyInvocation.MyCommand
     do
     {
-        (($cmdresult = &$vmrun List) 2>&1 | Out-Null)
-        write-verbose "$origin $cmdresult"
+        (($cmdresult = & $vmrun List) 2>&1 | Out-Null)
+        Write-Verbose "$($MyInvocation.MyCommand): $cmdresult"
     }
     until ($VMrunErrorCondition -notcontains $cmdresult)
-    write-verbose "$origin $cmdresult"
+
     foreach ($runvm in $cmdresult)
     {
         if ($runvm -notmatch "Total running VMs")
         {
-            [System.IO.FileInfo]$runvm = $runvm
-            $Object = New-Object -TypeName psobject
-            $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value ([string]($runvm.BaseName))
-            $Object | Add-Member -MemberType NoteProperty -Name config -Value $runvm.FullName
-            $Object | Add-Member -MemberType NoteProperty -Name Status -Value running
-            Write-Output $Object
-            # Shell opject will be cretaed in next version containing name, vmpath , status
-        } # end if
-    } #end foreach
-} #end get-vmxrun
-
+            $Object = New-Object PSObject -Property @{
+                Status      = "Running"
+                VMXName     = (Get-Item $runvm).BaseName
+                Config      = $runvm
+            }
+            $runvms += $Object
+        }
+    }
+    return $runvms
+}
 
 <#
     .SYNOPSIS
@@ -2543,10 +2647,10 @@ function Get-VMX
     [CmdletBinding(HelpUri = "http://labbuildr.bottnet.de/modules/get-vmx/")]
     param (
         [Parameter(ParameterSetName = "1", Position = 1,HelpMessage = "Please specify an optional VM Name",Mandatory = $false)]
-        [Parameter(ParameterSetName = "2",Mandatory = $false)]$VMXName,
+        [Parameter(ParameterSetName = "2", Mandatory = $false)]$VMXName,
         [Parameter(ParameterSetName = "1", HelpMessage = "Please enter an optional root Path to you VMs (default is vmxdir)",Mandatory = $false)]
         $Path = $vmxdir,
-        [Parameter(ParameterSetName = "1",Mandatory = $false)]$UUID,
+        [Parameter(ParameterSetName = "1", Mandatory = $false)]$UUID,
         [Parameter(ParameterSetName = "2", Position = 2,HelpMessage = "Please specify a config to vmx",Mandatory = $true)][System.IO.FileInfo]$config
     )
 
@@ -2555,32 +2659,35 @@ function Get-VMX
     {
         $vmxrun = (Get-VMXRun).config
         $Configfiles = @()
+        
+        Write-Verbose "$($MyInvocation.MyCommand): Begin"
+        Write-Verbose "$($MyInvocation.MyCommand): ParameterSetName - $($PsCmdlet.ParameterSetName)"
         switch ($PsCmdlet.ParameterSetName)
         {
             "1"
             {
-                Write-Verbose "Getting vmxname from parameterset 1"
+                #Write-Verbose "Getting vmxname from parameterset 1"
                 if ($VMXName)
                 {
                     $VMXName = $VMXName.TrimStart(".\")
                     $VMXName = $VMXName.Trimend("\")
                     $VMXName = $VMXName.TrimStart("./")
                     $VMXName = $VMXName.Trimend("/")
-                    Write-Verbose $VMXName
+                    Write-Verbose "$($MyInvocation.MyCommand): VMName - $VMXName"
                 }
-                else
-                {
-                    $VMXName = "*"
-                }
-                Write-Verbose $MyInvocation.MyCommand
+                else  { $VMXName = "*" }
+
+                #Write-Verbose $MyInvocation.MyCommand
                 if (!(Test-path $Path))
                 {
-                    Write-Warning "VM Path $Path does currently not exist"
+                    Write-Verbose "$($MyInvocation.MyCommand): WARNING - VM Path $Path does currently not exist"
                     # break
+                    return ( "VM Path $Path doesn't exist" | create-ErrorObject)
                 }
                 if (!($Configfiles = Get-ChildItem -Path $path -Recurse -File -Filter "$VMXName.vmx" -Exclude "*.vmxf" -ErrorAction SilentlyContinue ))
                 {
-                 Write-Warning "$($MyInvocation.MyCommand) : VM $VMXName does currently not exist"
+                    Write-Warning "$($MyInvocation.MyCommand): WARNING - VM $VMXName does currently not exist"
+                    return ( "VM $VMXName does currently not exist" | create-ErrorObject)
                 }
 
             }
@@ -2590,19 +2697,19 @@ function Get-VMX
                 $VMXname = $config.Basename
                 if (!($Configfiles = Get-Item -Path $config -ErrorAction SilentlyContinue ))
                 {
-                    Write-Warning "$($MyInvocation.MyCommand) : VM Config for $config does currently not exist"
+                    Write-Warning "$($MyInvocation.MyCommand): WARNING - VM Config for $config does currently not exist"
                     # break
                 }
             }
         }
         foreach ($Config in $Configfiles)
         {
-            Write-Verbose "getting Configfile: $($config.FullName) from parameterset 2"
+            Write-Verbose "$($MyInvocation.MyCommand): Getting Configfile: $($config.FullName) from parameterset 2"
             if ($Config.Extension -eq ".vmx")
             {
                 if ($UUID)
                 {
-                    Write-Verbose $UUID
+                    Write-Verbose "$($MyInvocation.MyCommand): $UUID"
                     $VMXUUID = Get-VMXUUID -config $Config.fullname
                     If ($VMXUUID.uuid -eq $UUID) {
                         $Object = New-Object -TypeName psobject
@@ -2628,8 +2735,9 @@ function Get-VMX
                         $Object | Add-Member -MemberType NoteProperty -Name Config -Value ([string]($Config.FullName))
                         $Object | Add-Member -MemberType NoteProperty -Name Path -Value ([string]($Config.Directory))
                         $Object | Add-Member -MemberType NoteProperty -Name VMXSnapConfig -Value ([string](Get-ChildItem -Path $Config.Directory -Filter "*.vmsd").Fullname)
-                        Write-Verbose "Config Fullname $($Config.Fullname)"
-                        Write-Output $Object
+                        Write-Verbose "$($MyInvocation.MyCommand): Config Fullname $($Config.Fullname)"
+                        #Write-Output $Object
+                        return $Object
                     } # end if
 
                 } #end-if uuid
@@ -2657,7 +2765,8 @@ function Get-VMX
                     $Object | Add-Member -MemberType NoteProperty -Name Config -Value ([string]($Config.FullName))
                     $Object | Add-Member -MemberType NoteProperty -Name Path -Value ([string]($Config.Directory))
                     $Object | Add-Member -MemberType NoteProperty -Name VMXSnapConfig -Value ([string](Get-ChildItem -Path $Config.Directory -Filter "*.vmsd").Fullname)
-                    Write-Output $Object
+                    #Write-Output $Object
+                    return $Object
                 }
             } #end if
         }
@@ -2717,13 +2826,13 @@ function New-VMXSnapshot
         Write-Host -ForegroundColor Magenta $VMXName -NoNewline
         do
         {
-            ($cmdresult = &$vmrun snapshot $config $SnapshotName) # 2>&1 | Out-Null
+            ($cmdresult = & $vmrun snapshot $config $SnapshotName) # 2>&1 | Out-Null
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -eq 0)
         {
             Write-Host -ForegroundColor Green "[success]"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType 'NoteProperty' -Name Snapshot -Value $SnapshotName
             $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
@@ -2782,13 +2891,13 @@ function Restore-VMXSnapshot
         Write-Verbose "Restoring Snapshot $Snapshot for $vmxname"
         do
         {
-            ($cmdresult = &$vmrun revertToSnapshot $config $Snapshot) # 2>&1 | Out-Null
+            ($cmdresult = & $vmrun revertToSnapshot $config $Snapshot) # 2>&1 | Out-Null
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -eq 0)
         {
             Write-Verbose "Sapshot $Snapshot restored"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType 'NoteProperty' -Name Snapshot -Value $Snapshot
             $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
@@ -2825,7 +2934,7 @@ function Restore-VMXSnapshot
         This example shows how to call the New-VMXLinkedClone function with named parameters.
 
     .OUTPUTS
-        psobject
+        PSObject
 
     .NOTES
         Additional information about the function or script.
@@ -2833,7 +2942,7 @@ function Restore-VMXSnapshot
 function New-VMXLinkedClone
 {
     [CmdletBinding(DefaultParameterSetName = '1',HelpUri = "https://github.com/bottkars/vmxtoolkit/wiki")]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
@@ -2874,7 +2983,7 @@ function New-VMXLinkedClone
             $Addcontent = @()
             $Addcontent += 'guestinfo.buildDate = "'+$BuildDate+'"'
             Add-Content -Path "$Cloneconfig" -Value $Addcontent
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name CloneName -Value $Clonename
             $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $Cloneconfig
             $Object | Add-Member -MemberType 'NoteProperty' -Name Path -Value $Targetpath
@@ -2894,7 +3003,7 @@ function New-VMXLinkedClone
 function New-VMXClone
 {
     [CmdletBinding(DefaultParameterSetName = '1',HelpUri = "https://github.com/bottkars/vmxtoolkit/wiki")]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(Mandatory = $true, ValueFromPipelineByPropertyName = $true)]
@@ -2931,7 +3040,7 @@ function New-VMXClone
         if ($LASTEXITCODE -eq 0 -and $cmdresult -ne "Error: The snapshot already exists")
         {
             Write-Host -ForegroundColor Green "[success]"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name CloneName -Value $Clonename
             $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $Cloneconfig
             $Object | Add-Member -MemberType 'NoteProperty' -Name Path -Value "$Clonepath\$Clonename"
@@ -2979,7 +3088,7 @@ function Get-VMXSnapshot
         {
             do
             {
-                ($cmdresult = &$vmrun listsnapshots $config $parameter) 2>&1 | Out-Null
+                ($cmdresult = & $vmrun listsnapshots $config $parameter) 2>&1 | Out-Null
             }
 
             until ($VMrunErrorCondition -notcontains $cmdresult)
@@ -2991,7 +3100,7 @@ function Get-VMXSnapshot
                 $Snaphots = $cmdresult[1..($cmdresult.count)]
                 foreach ($Snap in $Snaphots)
                 {
-                    $Object = New-Object psobject
+                    $Object = New-Object PSObject
                     $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value (Get-ChildItem -Path $Config).Basename
                     $Object | Add-Member -Type 'NoteProperty' -Name Snapshot -Value $Snap
                     $Object | Add-Member -Type 'NoteProperty' -Name Config -Value $Config
@@ -3060,12 +3169,12 @@ function Remove-VMXSnapshot
         {
             Write-Verbose $config
             Write-Verbose $Snapshot
-            ($cmdresult = &$vmrun deleteSnapshot $config $Snapshot $parameter)
+            ($cmdresult = & $vmrun deleteSnapshot $config $Snapshot $parameter)
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -eq 0)
         {
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value $VMXname
             $Object | Add-Member -Type 'NoteProperty' -Name Snapshot -Value $Snapshot
             $Object | Add-Member -Type 'NoteProperty' -Name SnapshotState -Value "removed$parameter"
@@ -3114,42 +3223,44 @@ function Start-VMX
     begin { }
     process
     {
+        Write-Verbose "$($MyInvocation.MyCommand): ParameterSetName - $($PsCmdlet.ParameterSetName)"
         switch ($PsCmdlet.ParameterSetName)
         {
             "1"
             {
-                Write-Verbose $_
+                #Write-Verbose "ParameterSetName $_"
                 if ($VMXName -match "\*")
                 {
-                    Write-Warning "Wildcard names are not allowed, use get-vmx $VMXName | start-vmx instead"
+                    Write-Warning "Wildcard names are not allowed, use Get-VMX $VMXName | Start-VMX instead"
                     break
                 }
                 $vmx = Get-VMX -VMXName $VMXname -UUID $UUID
             }
             "2"
             {
-                Write-Verbose $_
+                #Write-Verbose $_
                 $vmx = Get-VMX -Path $path
             }
             "3"
             {
-                Write-Verbose " by config with $_ "
+                #Write-Verbose " by config with $_ "
                 $vmx = Get-VMX -config $config
             }
         }
 
         if ($VMX)
         {
-            Write-Verbose "Testing VM $VMXname Exists and stopped or suspended"
+            Write-Verbose "$($MyInvocation.MyCommand): Testing VM $VMXname status"
             if (($vmx) -and ($vmx.state -ne "running"))
             {
-                [int]$vmxhwversion = (Get-VMXHWVersion -config $vmx.config).hwversion
+                #[int]$vmxhwversion = (Get-VMXHWVersion -config $vmx.config).hwversion
+                [int]$vmxhwversion = Get-VMXHWVersionString -config $vmx.config
                 if ($vmxHWversion -le $vmwareversion.major)
                 {
-                    Write-Verbose "Checking State for $vmxname : $($vmx.vmxname)  : $($vmx.state)"
-                    Write-Verbose "creating Backup of $($vmx.config)"
+                    Write-Verbose "$($MyInvocation.MyCommand): Checking State for $vmxname : $($vmx.vmxname) : $($vmx.state)"
+                    Write-Verbose "$($MyInvocation.MyCommand): Backup $($vmx.config)"
                     Copy-Item -Path $vmx.config -Destination "$($vmx.config).bak"
-                    Write-Verbose -Message "setting Startparameters for $vmxname"
+                    Write-Verbose "$($MyInvocation.MyCommand): Setting Startparameters for $vmxname"
                     $VMXStarttime = Get-Date -Format "MM.dd.yyyy hh:mm:ss"
                     $content = Get-Content $vmx.config | Where-Object { $_ -ne "" }
                     $content = $content | Where-Object { $_ -NotMatch "guestinfo.hypervisor" }
@@ -3159,54 +3270,118 @@ function Start-VMX
                     $content = $content |Where-Object { $_ -NotMatch "guestinfo.vmwareversion" }
                     $content += 'guestinfo.vmwareversion = "' + $Global:vmwareversion + '"'
                     Set-Content -Path $vmx.config -Value $content -Force
-                    Write-Verbose "starting VM $vmxname"
-                    Write-Host -ForegroundColor Gray " ==>starting Virtual Machine " -NoNewline
-                    Write-Host -ForegroundColor Magenta $VMX.vmxname -NoNewline
+                    Write-Verbose "$($MyInvocation.MyCommand): $vmxname starting..."
+                    #Write-Host -ForegroundColor Gray " ==>starting Virtual Machine " -NoNewline
+                    #Write-Host -ForegroundColor Magenta $VMX.vmxname -NoNewline
+
+                    $argumentList = "start $($vmx.config)"
+                    if ($nogui)  { $argumentList = $argumentList + " nogui" }
+
+                    $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList -wait:(!$nowait)
+
+                    <#
                     if ($nowait.IsPresent)
                     {
+                        $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList -wait:$nowait
+                        Start-Process -FilePath $vmrun -ArgumentList $argumentList -NoNewWindow
+                        
                         if ($nogui.IsPresent)
                         {
-                            Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui" -NoNewWindow
+                            #Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui" -NoNewWindow
+                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui"
                         }
                         else
                         {
-                            Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) " -NoNewWindow
+                            #Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) " -NoNewWindow
+                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config)"
                         }
+                        
                     }
                     else
                     {
                         do
                         {
+                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList
+                            
                             if ($nogui.IsPresent)
                             {
-                                $cmdresult = &$vmrun start $vmx.config nogui #  2>&1 | Out-Null
+                                #$cmdresult = & $vmrun start $vmx.config nogui #  2>&1 | Out-Null
+                                $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui"
                             }
                             else
                             {
-                                $cmdresult = &$vmrun start $vmx.config #  2>&1 | Out-Null
+                                $cmdresult = & $vmrun start $vmx.config #  2>&1 | Out-Null
+                                $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config)"
                             }
+                            
                         }
                         until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
                     }
-                    if ($LASTEXITCODE -eq 0)
+                    #>
+                    #if ($LASTEXITCODE -eq 0)
+                    if ($result.ExitCode -eq 0)
                     {
-                        Write-Host -ForegroundColor Green "[success]"
-                        $Object = New-Object psobject
+                        #Write-Host -ForegroundColor Green "[success]"
+                        Write-Verbose "$($MyInvocation.MyCommand): SUCCESS"
+                        <#
+                        $Object = New-Object PSObject
                         $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value $VMX.VMXname
                         $Object | Add-Member -Type 'NoteProperty' -Name Status -Value "Started"
                         $Object | Add-Member -Type 'NoteProperty' -Name Starttime -Value $VMXStarttime
-                        Write-Output $Object
+                        #>
+                        $Object = New-Object PSObject -Property @{
+                            Result      = "Success"
+                            VMXname     = $VMX.VMXname
+                            Status      = "Started"
+                            Starttime   = $VMXStarttime
+                            Notes       = "VM was started successfully"
+                        }
+                        return $Object
                     }
                     else
                     {
-                        Write-Warning "There was an error starting the VM: $cmdresult"
+                        #Write-Host -ForegroundColor Red "[error]"
+                        Write-Verbose "$($MyInvocation.MyCommand): ERROR, details: $($result.Output)"
+                        Write-Verbose "There was an error starting the VM: $($result.Output)"
+                        $Object = New-Object PSObject -Property @{
+                            Result      = "Error"
+                            VMXname     = $VMX.VMXname
+                            Status      = "Unknown"
+                            Starttime   = ""
+                            Notes       = "Error starting the VM, details $($result.Output)"
+                        }
+                        return $Object
                     }
                 }
-                else { Write-Error "Vmware version does not match, need version $vmxhwversion "	}
+                else  ## Vmware version does not match
+                {
+                    Write-Verbose "$($MyInvocation.MyCommand): ERROR; Vmware version does not match, need version $vmxhwversion"
+                    $Object = New-Object PSObject -Property @{
+                        Result      = "Error"
+                        VMXname     = $VMX.VMXname
+                        Status      = "Unknown"
+                        Starttime   = ""
+                        Notes       = "VMWare version does not match, need version $vmxhwversion"
+                    }
+                    return $Object
+                }
             }
-            elseif ($vmx.state -eq "running") { Write-Verbose "VM $VMXname already running" } # end elseif
-
-            else { Write-Verbose "VM $VMXname not found" } # end if-vmx
+            elseif ($vmx.state -eq "running")
+            {
+                Write-Verbose "$($MyInvocation.MyCommand): SUCCESS; VM $VMXname already running"
+                $Object = New-Object PSObject -Property @{
+                    Result      = "Success"
+                    VMXname     = $VMX.VMXname
+                    Status      = "Running"
+                    Starttime   = ""
+                    Notes       = "VM was already running"
+                }
+                return $Object
+            }
+            else
+            {
+                Write-Verbose "VM $VMXname not found"
+            } # end if-vmx
         }
     } # end process
     end { }
@@ -3241,7 +3416,7 @@ function Stop-VMX
         [Parameter(ParameterSetName = "1", Mandatory = $false,ValueFromPipelineByPropertyName = $True)]
         [Alias('VMXUUID')][string]$UUID,
         [Parameter(ParameterSetName = "2", Mandatory = $true,ValueFromPipelineByPropertyName = $True)]$config,
-        [Parameter(HelpMessage = "Valid modes are Soft ( shutdown ) or Stop (Poweroff)", Mandatory = $false)]
+        [Parameter(HelpMessage = "Valid modes are Soft ( Shutdown ) or Stop ( Poweroff )", Mandatory = $false)]
         [ValidateSet('Soft', 'Hard')]$Mode
         )
 
@@ -3262,7 +3437,7 @@ function Stop-VMX
             {
                 Write-Verbose "Parameter Set 2"
                 Write-Verbose "Config: $config"
-                $state = (get-vmx -config $config).state
+                $state = (Get-VMX -config $config).state
             }
         }
 
@@ -3274,11 +3449,11 @@ function Stop-VMX
             do
             {
 
-                ($cmdresult = &$vmrun stop $config $Mode) # 2>&1 | Out-Null
+                ($cmdresult = & $vmrun stop $config $Mode) # 2>&1 | Out-Null
                 Write-Verbose "$Origin $vmxname $cmdresult"
             }
             until ($VMrunErrorCondition -notcontains $cmdresult)
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value $VMXname
             $Object | Add-Member -Type 'NoteProperty' -Name Status -Value "Stopped $Mode"
             Write-Output $Object
@@ -3329,12 +3504,12 @@ function Suspend-VMX
             $Origin = $MyInvocation.MyCommand
             do
             {
-                $cmdresult = &$vmrun suspend $vmx.config # 2>&1 | Out-Null
+                $cmdresult = & $vmrun suspend $vmx.config # 2>&1 | Out-Null
                 write-verbose "$Origin suspend $VMXname $cmdresult"
             }
             until ($VMrunErrorCondition -notcontains $cmdresult)
             $VMXSuspendtime = Get-Date -Format "MM.dd.yyyy hh:mm:ss"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value $VMX.VMXname
             $Object | Add-Member -Type 'NoteProperty' -Name Status -Value "Suspended"
             $Object | Add-Member -Type 'NoteProperty' -Name Suspendtime -Value $VMXSuspendtime
@@ -3385,14 +3560,14 @@ function Set-VMXTemplate
 
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             if (Test-Path $config)
             {
                 Write-verbose $config
                 $content = Get-Content -Path $config | Where-Object { $_ -ne "" }
                 $content = $content | Where-Object{ $_ -NotMatch "templateVM" }
-                $Object = New-Object psobject
+                $Object = New-Object PSObject
                 $Object | Add-Member -Type 'NoteProperty' -Name VMXName -Value $VMXName
                 $Object | Add-Member -Type 'NoteProperty' -Name VMXconfig -Value $config
                 if ($unprotect.IsPresent)
@@ -3444,7 +3619,7 @@ function Set-VMXTemplate
         This example shows how to call the Get-VMXTemplate function with named parameters.
 
     .OUTPUTS
-        psobject
+        PSObject
 
     .NOTES
         Additional information about the function or script.
@@ -3452,7 +3627,7 @@ function Set-VMXTemplate
 function Get-VMXTemplate
 {
     [CmdletBinding(DefaultParameterSetName = '1',HelpUri = "https://github.com/bottkars/vmxtoolkit/wiki")]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $True)]$config
@@ -3465,7 +3640,7 @@ function Get-VMXTemplate
         $Content = Get-Content $config | Where-Object{ $_ -ne '' }
         if ($content -match 'templateVM = "TRUE"')
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name TemplateName -Value (Get-ChildItem $config).basename
             $Object | Add-Member -MemberType NoteProperty -Name GuestOS -Value (Get-VMXGuestOS -config $config).GuestOS
             $Object | Add-Member -MemberType NoteProperty -Name UUID -Value (Get-VMXUUID -config $config).uuid
@@ -3512,7 +3687,7 @@ function Set-VMXNetworkAdapter
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             if (!$PCISlot)
             {
@@ -3532,7 +3707,7 @@ function Set-VMXNetworkAdapter
             $Addnic += @('ethernet'+$Adapter+'.virtualDev = "'+$AdapterType+'"')
             $Content += $Addnic
             $Content | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Adapter -Value "Ethernet$Adapter"
             $Object | Add-Member -MemberType NoteProperty -Name AdapterType -Value $AdapterType
@@ -3585,7 +3760,7 @@ function Connect-VMXNetworkAdapter
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Content = Get-Content -Path $config
             Write-verbose "ethernet$Adapter.present"
@@ -3595,7 +3770,7 @@ function Connect-VMXNetworkAdapter
                 $Content = $Content -notmatch "ethernet$Adapter.StartConnected"
                 $Content += 'ethernet'+$Adapter+'.StartConnected = "True"'
                 $Content | Set-Content -Path $config
-                $Object = New-Object -TypeName psobject
+                $Object = New-Object -TypeName PSObject
                 $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
                 $Object | Add-Member -MemberType NoteProperty -Name Adapter -Value "Ethernet$Adapter"
                 $Object | Add-Member -MemberType NoteProperty -Name Connected -Value True
@@ -3629,7 +3804,7 @@ function Connect-VMXcdromImage
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Content = Get-Content -Path $config
             Write-verbose "Checking for $($Contoller)$($Port).present"
@@ -3641,7 +3816,7 @@ function Connect-VMXcdromImage
             {
                 Write-Host -ForegroundColor Gray -NoNewline " ==> Configuring IDE $($Contoller)$($Port) on "
                 Write-Host -ForegroundColor Magenta -NoNewline $VMXName
-                $Object = New-Object -TypeName psobject
+                $Object = New-Object -TypeName PSObject
                 $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
                 $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
                 $Object | Add-Member -MemberType NoteProperty -Name Controller -Value "$($Contoller)$($Port)"
@@ -3708,7 +3883,7 @@ function Disconnect-VMXNetworkAdapter
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Content = Get-Content -Path $config
             Write-verbose "ethernet$Adapter.present"
@@ -3718,7 +3893,7 @@ function Disconnect-VMXNetworkAdapter
                 $Content = $Content -notmatch "ethernet$Adapter.StartConnected"
                 $Content += 'ethernet'+$Adapter+'.StartConnected = "False"'
                 $Content | Set-Content -Path $config
-                $Object = New-Object -TypeName psobject
+                $Object = New-Object -TypeName PSObject
                 $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
                 $Object | Add-Member -MemberType NoteProperty -Name Adapter -Value "Ethernet$Adapter"
                 $Object | Add-Member -MemberType NoteProperty -Name Connected -Value False
@@ -3752,7 +3927,7 @@ function Set-VMXVnet
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $Content = Get-Content -Path $config
             Write-verbose "ethernet$Adapter.present"
@@ -3769,7 +3944,7 @@ function Set-VMXVnet
             Write-Host -ForegroundColor Gray -NoNewline " ==>setting ethernet$Adapter to $Vnet for "
             Write-Host -ForegroundColor Magenta $VMXName -NoNewline
             Write-Host -ForegroundColor Green "[success]"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name VMXname -Value $VMXName
             $Object | Add-Member -MemberType 'NoteProperty' -Name Adapter -Value "ethernet$Adapter"
             $Object | Add-Member -MemberType 'NoteProperty' -Name VirtualNet -Value $vnet
@@ -3825,7 +4000,7 @@ function Remove-VMXserial
     {
         $content = Get-Content -Path $config | Where-Object{ $_ -Notmatch "serial0" }
         Set-Content -Path $config -Value $Content
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType 'NoteProperty' -Name CloneName -Value $VMXname
         $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
         $Object | Add-Member -MemberType 'NoteProperty' -Name Path -Value $Path
@@ -3852,13 +4027,13 @@ function Set-VMXserialPipe
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $content = Get-Content -Path $config | Where-Object{ $_ -Notmatch "serial0"}
             $AddSerial = @('serial0.present = "True"', 'serial0.fileType = "pipe"', 'serial0.fileName = "\\.\pipe\\console"', 'serial0.tryNoRxLoss = "TRUE"')
             Set-Content -Path $config -Value $Content
             $AddSerial | Add-Content -Path $config
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name CloneName -Value $VMXname
             $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
             $Object | Add-Member -MemberType 'NoteProperty' -Name Path -Value $Path
@@ -3933,7 +4108,7 @@ function Remove-vmx
             { $vmx = Get-VMX -VMXName $VMXname }
 
             "2"
-            {$VMX = get-vmx -Path $config }
+            {$VMX = Get-VMX -Path $config }
 
         }
 
@@ -3961,7 +4136,7 @@ function Remove-vmx
             {
                 do
                 {
-                    $cmdresult = &$vmrun deleteVM "$config" # 2>&1 | Out-Null
+                    $cmdresult = & $vmrun deleteVM "$config" # 2>&1 | Out-Null
                     write-verbose "$Origin deleteVM $vmname $cmdresult"
                     write-verbose $LASTEXITCODE
                 }
@@ -3979,7 +4154,7 @@ function Remove-vmx
                 else
                 {
                     Remove-Item -Path $vmx.Path -Recurse -Force -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-                    $Object = New-Object psobject
+                    $Object = New-Object PSObject
                     $Object | Add-Member -Type 'NoteProperty' -Name VMXname -Value $VMXname
                     $Object | Add-Member -Type 'NoteProperty' -Name Status -Value "removed"
                     Write-Output $Object
@@ -4035,7 +4210,7 @@ function New-VMXScsiDisk
         if ($LASTEXITCODE -eq 0)
         {
             Write-Host -ForegroundColor Green "[success]"
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType NoteProperty -Name Disktype -Value "lsilogic"
             $Object | Add-Member -MemberType NoteProperty -Name Diskname -Value $NewDiskname
@@ -4074,13 +4249,13 @@ function Remove-VMXScsiDisk
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             $vmxConfig = Get-VMXConfig -config $config
             $vmxconfig = $vmxconfig | Where-Object{$_ -notmatch "scsi$($Controller):$($LUN)"}
             Write-Verbose "Removing Disk #$Disk lun $lun from controller $Controller"
             $vmxConfig | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType NoteProperty -Name Cotroller -Value $Controller
             $Object | Add-Member -MemberType NoteProperty -Name LUN -Value $LUN
@@ -4139,7 +4314,7 @@ function Add-VMXScsiDisk
         $vmxConfig += $AddDrives
         $vmxConfig | Set-Content -Path $config
         Write-Host -ForegroundColor Green "[success]"
-        $Object = New-Object -TypeName psobject
+        $Object = New-Object -TypeName PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
         $Object | Add-Member -MemberType NoteProperty -Name Filename -Value $Diskname
         $Object | Add-Member -MemberType NoteProperty -Name Cotroller -Value $Controller
@@ -4168,14 +4343,14 @@ function Set-VMXScenario
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             Copy-Item -Path $config -Destination "$($config).bak"
             $Content = Get-Content -Path $config
             $Content = ($Content -notmatch "guestinfo.Scenario$Scenario")
             $content += 'guestinfo.scenario'+$Scenario+' = "'+$ScenarioName+'"'
             Set-Content -Path $config -Value $Content
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMX.VMXname
             $Object | Add-Member -MemberType NoteProperty -Name Scenario -Value $Scenario
             $Object | Add-Member -MemberType NoteProperty -Name Scenarioname -Value $scenarioname
@@ -4196,7 +4371,7 @@ function Set-VMXScenario
 function Get-VMXscenario
 {
     [CmdletBinding(DefaultParameterSetName = '1')]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4215,7 +4390,7 @@ function Get-VMXscenario
         $Value = Search-VMXPattern -Pattern "guestinfo.scenario\d{1,9}" -vmxconfig $vmxconfig -name "Scenario" -value "Scenarioname" -patterntype $patterntype
         foreach ($Scenarioset in $value)
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType NoteProperty -Name Scenario -Value $Scenarioset.Scenario.Trimstart("guestinfo.scenario")
             $Object | Add-Member -MemberType NoteProperty -Name Scenarioname -Value $Scenarioset.scenarioname
@@ -4267,14 +4442,14 @@ function Set-VMXActivationPreference
     begin { }
     process
     {
-        if ((get-vmx -Path $config).state -eq "stopped")
+        if ((Get-VMX -Path $config).state -eq "stopped")
         {
             Copy-Item -Path $config -Destination "$($config).bak"
             $Content = Get-Content -Path $config
             $Content = ($Content -notmatch "guestinfo.activationpreference")
             $content += 'guestinfo.activationpreference = "' + $activationpreference + '"'
             Set-Content -Path $config -Value $Content
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType NoteProperty -Name ActivationPreference -Value $activationpreference
             $Object | Add-Member -MemberType NoteProperty -Name Config -Value $Config
@@ -4312,7 +4487,7 @@ function Set-VMXActivationPreference
 function Get-VMXActivationPreference
 {
     [CmdletBinding(DefaultParameterSetName = 1,HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXActivationPreference/")]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $false, ValueFromPipelineByPropertyName = $true)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4329,7 +4504,7 @@ function Get-VMXActivationPreference
         $ErrorActionPreference = "silentlyContinue"
         Write-Verbose -Message "getting $ObjectType"
         $Value = Search-VMXPattern -Pattern $patterntype -vmxconfig $vmxconfig  -value $patterntype -patterntype $patterntype
-        $Object = New-Object -TypeName psobject
+        $Object = New-Object -TypeName PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXname -Value $VMXname
         $Object | Add-Member -MemberType NoteProperty -Name $ObjectType -Value $Value.ActivationPreference
         $Object | Add-Member -MemberType NoteProperty -Name Config -Value $Config
@@ -4355,7 +4530,7 @@ function Invoke-VMXPowerShell
     DefaultParameterSetName = 1,
     SupportsShouldprocess=$true,
     ConfirmImpact="Medium")]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $false, ValueFromPipelineByPropertyName = $true)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4392,7 +4567,7 @@ function Invoke-VMXPowerShell
             do
             {
                 Write-Verbose "c:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe '$myscript' '$Parameter'"
-                $cmdresult = (&$vmrun  -gu $Guestuser -gp $Guestpassword  runPrograminGuest $config -activewindow "$nowait_parm" $interactive_parm c:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Executionpolicy bypass "$myscript" "$Parameter")
+                $cmdresult = (& $vmrun -gu $Guestuser -gp $Guestpassword  runPrograminGuest $config -activewindow "$nowait_parm" $interactive_parm c:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Executionpolicy bypass "$myscript" "$Parameter")
             }
             until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
             Write-Verbose "Exitcode : $Lastexitcode"
@@ -4424,7 +4599,7 @@ function Invoke-VMXPowerShell
         until ($Myresult -eq 1)
         Write-Host  -ForegroundColor Green "[success]"
         Write-Verbose "Myresult: $Myresult"
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
         $Object | Add-Member -MemberType 'NoteProperty' -Name Script -Value $Script
         $Object | Add-Member -MemberType 'NoteProperty' -Name Exitcode -Value $Lastexitcode
@@ -4493,7 +4668,7 @@ function Invoke-VMXBash
             $Myresult = 1
             do
             {
-                $cmdresult = (&$vmrun  -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm /bin/bash $Scriptblock)
+                $cmdresult = (& $vmrun -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm /bin/bash $Scriptblock)
             }
             until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
             Write-Verbose "Exitcode : $Lastexitcode"
@@ -4530,7 +4705,7 @@ function Invoke-VMXBash
         until ($Myresult -eq 1)
         Write-Host -ForegroundColor Green "[success]"
         Write-Verbose "Myresult: $Myresult"
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType 'NoteProperty' -Name Scriptblock -Value $Scriptblock
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
@@ -4547,7 +4722,7 @@ function Invoke-VMXScript
     [CmdletBinding(DefaultParameterSetName = 1,
     ConfirmImpact="Medium")]
 
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $false, ValueFromPipelineByPropertyName = $true)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4584,7 +4759,7 @@ function Invoke-VMXScript
             $Myresult = 1
             do
             {
-                $cmdresult = (&$vmrun  -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm $Scriptblock)
+                $cmdresult = (& $vmrun -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm $Scriptblock)
             }
             until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
             Write-Verbose "Exitcode : $Lastexitcode"
@@ -4616,7 +4791,7 @@ function Invoke-VMXScript
         until ($Myresult -eq 1)
         Write-Host -ForegroundColor Green "[success]"
         Write-Verbose "Myresult: $Myresult"
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType 'NoteProperty' -Name Scriptblock -Value $Scriptblock
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
@@ -4632,7 +4807,7 @@ function Invoke-VMXScript
 function Invoke-VMXexpect
 {
     [CmdletBinding(DefaultParameterSetName = 1)]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $false, ValueFromPipelineByPropertyName = $true)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4658,10 +4833,10 @@ function Invoke-VMXexpect
         Write-Verbose "starting $Scriptblock"
         do
         {
-            $cmdresult = (&$vmrun  -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm "/usr/bin/expect -c "  "$Scriptblock")
+            $cmdresult = (& $vmrun -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm "/usr/bin/expect -c "  "$Scriptblock")
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType 'NoteProperty' -Name Scriptblock -Value $Scriptblock
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
@@ -4685,7 +4860,7 @@ function Invoke-VMXexpect
 function Invoke-VMXexpect
 {
     [CmdletBinding(DefaultParameterSetName = 1)]
-    [OutputType([psobject])]
+    [OutputType([PSObject])]
     param
     (
         [Parameter(ParameterSetName = "1", Mandatory = $false, ValueFromPipelineByPropertyName = $true)][Alias('NAME','CloneName')][string]$VMXName,
@@ -4711,10 +4886,10 @@ function Invoke-VMXexpect
         Write-Verbose "starting $Scriptblock"
         do
         {
-            $cmdresult = (&$vmrun  -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm /usr/bin/expect  "$Scriptblock")
+            $cmdresult = (& $vmrun -gu $Guestuser -gp $Guestpassword  runScriptinGuest $config -activewindow "$nowait_parm" $interactive_parm /usr/bin/expect  "$Scriptblock")
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
-        $Object = New-Object psobject
+        $Object = New-Object PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType 'NoteProperty' -Name Scriptblock -Value $Scriptblock
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
@@ -4777,7 +4952,7 @@ function Get-VMXSnapshotconfig
             $Diskname = Search-VMXPattern -pattern "$($Snap.Snapshotnumber).disk\d{1,2}.node" -vmxconfig $Snapcfg -name Disk -value ID -patterntype ".node"
             $Disknum = Search-VMXPattern -pattern "$($Snap.Snapshotnumber).numDisks" -vmxconfig $Snapcfg -name Disk -value Diskcount -patterntype ".numDisks"
             $Displayname = Search-VMXPattern -pattern "$($Snap.Snapshotnumber).Displayname" -vmxconfig $Snapcfg -Name Displayname -value UserFriendlyName -patterntype ".displayName"
-            $Object = New-Object psobject
+            $Object = New-Object PSObject
             $Object | Add-Member -MemberType 'NoteProperty' -Name VMXname -Value $VMXname
             $Object | Add-Member -MemberType 'NoteProperty' -Name SnapShotnumber -Value $Snap.Snapshotnumber
             $Object | Add-Member -MemberType 'NoteProperty' -Name SnapUID -Value $Snap.UID
@@ -4802,7 +4977,8 @@ function Get-VMXSnapshotconfig
 function Set-VMXMainMemory
 {
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Set-VMXMEMFile/")]
-    param (
+    param 
+    (
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
         [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][switch]$usefile
@@ -4818,7 +4994,7 @@ function Set-VMXMainMemory
             "2"
             { $vmxconfig = Get-VMXConfig -config $config }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             Write-Host -ForegroundColor Gray " ==>setting MainMemoryUseFile to $($usefile.IsPresent) for " -NoNewline
             Write-Host -ForegroundColor Magenta $vmxname -NoNewline
@@ -4835,7 +5011,7 @@ function Set-VMXMainMemory
 
             $vmxconfig | Set-Content -Path $config
             Write-Host -ForegroundColor Green "[success]"
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name UseMemFile -Value $($usefile.IsPresent)
             Write-Output $Object
@@ -4856,7 +5032,8 @@ function Set-VMXMainMemory
 function Set-VMXmemory
 {
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXMemory/")]
-    param (
+    param 
+    (
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
         [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Validaterange(8,131072)][int]$MemoryMB
@@ -4872,13 +5049,13 @@ function Set-VMXmemory
             "2"
             { $vmxconfig = Get-VMXConfig -config $config }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             Write-Verbose "We got to set $MemoryMB MB"
             $vmxconfig = $vmxconfig | Where-Object{$_ -NotMatch "memsize"}
             $vmxconfig += 'memsize = "'+$MemoryMB+'"'
             $vmxconfig | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Memory -Value $MemoryMB
             Write-Output $Object
@@ -4895,7 +5072,8 @@ function Set-VMXmemory
 function Set-VMXHWversion
 {
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXMemory/")]
-    param (
+    param 
+    (
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
         [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Validaterange(3,14)][int]$HWversion
@@ -4906,18 +5084,16 @@ function Set-VMXHWversion
     {
         switch ($PsCmdlet.ParameterSetName)
         {
-            "1"
-            { $vmxconfig = Get-VMXConfig -VMXName $VMXname }
-            "2"
-            { $vmxconfig = Get-VMXConfig -config $config }
+            "1"  { $vmxconfig = Get-VMXConfig -VMXName $VMXname }
+            "2"  { $vmxconfig = Get-VMXConfig -config $config }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             Write-Verbose "We got to set $MemoryMB MB"
             $vmxconfig = $vmxconfig | Where-Object{$_ -NotMatch "virtualhw.version"}
             $vmxconfig += 'virtualhw.version = "'+$HWversion+'"'
             $vmxconfig | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name HWVersion -Value $HWversion
             Write-Output $Object
@@ -4937,7 +5113,8 @@ function Set-VMXHWversion
 function Set-VMXprocessor
 {
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXMemory/")]
-    param (
+    param 
+    (
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
         [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
         [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Validaterange(1,32)][int]$processorcount
@@ -4952,13 +5129,13 @@ function Set-VMXprocessor
             "2"
             { $vmxconfig = Get-VMXConfig -config $config }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             Write-Verbose "We got to set $processorcount CPUs"
             $vmxconfig = $vmxconfig | Where-Object{$_ -NotMatch "numvcpus"}
             $vmxconfig += 'numvcpus = "'+$processorcount+'"'
             $vmxconfig | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name processor -Value $processorcount
             Write-Output $Object
@@ -4971,12 +5148,14 @@ function Set-VMXprocessor
     end { }
 }
 
-function Set-VMXToolsReminder {
+function Set-VMXToolsReminder 
+{
     [CmdletBinding(DefaultParametersetName = "2",HelpUri = "http://labbuildr.bottnet.de/modules/Get-VMXMemory/")]
-    param (
-    [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
-    [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
-    [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Switch]$enabled
+    param 
+    (
+        [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)][Alias('NAME','CloneName')]$VMXName,
+        [Parameter(ParameterSetName = "2", Mandatory = $false, ValueFromPipelineByPropertyName = $True)]$config,
+        [Parameter(ParameterSetName = "2", Mandatory = $true, ValueFromPipelineByPropertyName = $True)][Switch]$enabled
     )
 
     begin { }
@@ -4989,13 +5168,13 @@ function Set-VMXToolsReminder {
             "2"
             { $vmxconfig = Get-VMXConfig -config $config }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             Write-Verbose "We got to set Tools Reminder to $enabled"
             $vmxconfig = $vmxconfig | Where-Object{$_ -NotMatch "tools.remindInstall"}
             $vmxconfig += 'tools.remindInstall = "'+$enabled+'"'
             $vmxconfig | Set-Content -Path $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name ToolsReminder -Value $enabled
             Write-Output $Object
@@ -5045,7 +5224,7 @@ function Set-VMXSize
             "2"
             { }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             switch ($Size)
             {
@@ -5060,7 +5239,7 @@ function Set-VMXSize
             Write-Host -ForegroundColor Gray " ==>adjusting VM to size $Size with $processor CPU and $Memory MB"
             $cpuout = (Set-VMXprocessor -VMXName $config -processorcount $processor -config $config).processor
             $memout = (Set-VMXmemory -VMXName $config -MemoryMB $Memory -config $config).Memory
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Size -Value $Size
             $Object | Add-Member -MemberType NoteProperty -Name processor -Value $cpuout
@@ -5102,7 +5281,7 @@ function Set-VMXDisplayScaling
             $vmxconfig = Get-VMXConfig -config $config
             }
         }
-        if ((get-vmx -Path $config).state -eq "stopped" )
+        if ((Get-VMX -Path $config).state -eq "stopped" )
         {
             $vmxconfig = $vmxconfig -notmatch 'gui.applyHostDisplayScalingToGuest'
             $vmxconfig = $vmxconfig -notmatch 'unity.wasCapable'
@@ -5110,7 +5289,7 @@ function Set-VMXDisplayScaling
             $vmxconfig += 'gui.applyHostDisplayScalingToGuest = "'+"$($enable.IsPresent)"+'"'
             $vmxconfig += 'unity.wasCapable = "'+"$($enable.IsPresent)"+'"'
             $vmxconfig | Set-Content $config
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Size -Value $Size
             $Object | Add-Member -MemberType NoteProperty -Name DisplayScaling -Value $($enable.IsPresent)
@@ -5164,13 +5343,13 @@ function Copy-VMXFile2Guest
     {
         do
         {
-            ($cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword copyfilefromhosttoguest $config $Sourcefile "$targetfile")  2>&1 | Out-Null
+            ($cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword copyfilefromhosttoguest $config $Sourcefile "$targetfile")  2>&1 | Out-Null
             write-verbose "$cmdresult"
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -eq 0)
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Sourcefile -Value $sourcefile
             $Object | Add-Member -MemberType NoteProperty -Name Direction -Value "==>"
@@ -5199,13 +5378,13 @@ function Copy-VMXFile2Host
     {
         do
         {
-            ($cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword copyfilefromguesttohost $config $Sourcefile "$targetfile")  2>&1 | Out-Null
+            ($cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword copyfilefromguesttohost $config $Sourcefile "$targetfile")  2>&1 | Out-Null
             write-verbose "$cmdresult"
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -eq 0)
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Sourcefile -Value $sourcefile
             $Object | Add-Member -MemberType NoteProperty -Name Direction -Value "==>"
@@ -5252,7 +5431,7 @@ function Copy-VMXDirHost2Guest
     {
         $targetpath =$targetpath.Replace("\","/")
     }
-    $cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword directoryExistsInGuest $config $targetpath # 2>&1 | Out-Null
+    $cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword directoryExistsInGuest $config $targetpath # 2>&1 | Out-Null
     if ($cmdresult -eq "The directory does not exist.")
     {
         Write-warning "$cmdresult : $targetpath, creating it"
@@ -5274,7 +5453,7 @@ function Copy-VMXDirHost2Guest
             $TargetDir = Split-Path -LiteralPath $Targetfile
             Write-Verbose "Sourcefile: $($file.fullname)"
             Write-Verbose "Targetfile: $Targetfile"
-            $cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword copyfilefromhosttoguest $config $file.FullName $Targetfile # 2>&1 | Out-Null
+            $cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword copyfilefromhosttoguest $config $file.FullName $Targetfile # 2>&1 | Out-Null
             if ($cmdresult -eq "Error: A file was not found")
             {
                 if ($Linux.IsPresent)
@@ -5294,7 +5473,7 @@ function Copy-VMXDirHost2Guest
         }
         else
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Source -Value $file.FullName
             $Object | Add-Member -MemberType NoteProperty -Name Direction -Value "==>"
@@ -5320,7 +5499,7 @@ function New-VMXGuestPath
     {
         $VMXName = (Split-Path -Leaf -Path $config).Replace(".vmx","")
     }
-    $cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword directoryExistsInGuest $config $targetpath # 2>&1 | Out-Null
+    $cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword directoryExistsInGuest $config $targetpath # 2>&1 | Out-Null
     Write-Verbose $cmdresult
     if ($cmdresult -eq "The directory exists.")
     {
@@ -5331,7 +5510,7 @@ function New-VMXGuestPath
         Write-Verbose $targetpath
         do
         {
-            $cmdresult = &$vmrun -gu $Guestuser -gp $Guestpassword createDirectoryInGuest $config $targetpath # 2>&1 | Out-Null
+            $cmdresult = & $vmrun -gu $Guestuser -gp $Guestpassword createDirectoryInGuest $config $targetpath # 2>&1 | Out-Null
         }
         until ($VMrunErrorCondition -notcontains $cmdresult)
         if ($LASTEXITCODE -ne 0)
@@ -5340,7 +5519,7 @@ function New-VMXGuestPath
         }
         else
         {
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name Targetpath -Value $targetpath
             $Object | Add-Member -MemberType NoteProperty -Name CreateTime -Value (Get-Date -Format "yyyy.MM.dd hh:mm")
@@ -5354,7 +5533,7 @@ function New-VMXGuestPath
     .DESCRIPTION
         The Function will configure Networking in a Linux VM using networking scripts ( redhat, centos, suse )
     .Example
-        $vmx = get-vmx -path c:\centos
+        $vmx = Get-VMX -path c:\centos
 
         $vmx | Set-VMXLinuxNetwork -ipaddress 192.168.2.110 -network 192.168.2.0 -netmask 255.255.255.0 -gateway 192.168.2.10 -device eth0 -Peerdns -DNS1 192.168.2.10 -DNSDOMAIN labbuildr.local -Hostname centos3 -rootuser root -rootpassword Password123!
         #>
@@ -5388,7 +5567,7 @@ function Set-VMXLinuxNetwork
     {
         Write-Verbose $vmxname
         write-verbose $config
-        if (!($vmx = get-vmx -Path $config))
+        if (!($vmx = Get-VMX -Path $config))
         {
             Write-Warning "Could not find vm with Name $VMXName and Config $config"
             break
@@ -5493,7 +5672,7 @@ function Set-VMXLinuxNetwork
 
 
             $vmx | Invoke-VMXBash -Scriptblock "/sbin/service network restart" -Guestuser $rootuser -Guestpassword $Rootpassword
-            $Object = New-Object -TypeName psobject
+            $Object = New-Object -TypeName PSObject
             $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
             $Object | Add-Member -MemberType NoteProperty -Name IPAddress -Value $ipaddress
             $Object | Add-Member -MemberType NoteProperty -Name Gateway -Value $gateway
@@ -5550,7 +5729,7 @@ function Set-VMXLinuxDNS
     {
         Write-Verbose $vmxname
         write-verbose $config
-        if (!($vmx = get-vmx -Path $config))
+        if (!($vmx = Get-VMX -Path $config))
         {
             Write-Warning "Could not find vm with Name $VMXName and Config $config"
             break
@@ -5569,7 +5748,7 @@ function Set-VMXLinuxDNS
         $Scriptblock = "echo 'search $Search'  >> /etc/resolv.conf"
         Write-Verbose "Invoking $Scriptblock"
         $VMX | Invoke-VMXBash -Scriptblock $Scriptblock -Guestuser $rootuser -Guestpassword $rootpassword
-        $Object = New-Object -TypeName psobject
+        $Object = New-Object -TypeName PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType NoteProperty -Name Domain -Value $Domain
         $Object | Add-Member -MemberType NoteProperty -Name Search -Value $Search
@@ -5627,7 +5806,7 @@ function Get-VMXAnnotation
         $annotation = $annotation -replace '"',''
         $Annotation = $annotation.replace("|0D|0A",'"')
         $Annotation = $Annotation.split('"')
-        $Object = New-Object -TypeName psobject
+        $Object = New-Object -TypeName PSObject
         $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
         $Object | Add-Member -MemberType NoteProperty -Name Line0 -Value $Annotation[0]
         $Object | Add-Member -MemberType NoteProperty -Name Line1 -Value $Annotation[1]
@@ -5696,7 +5875,7 @@ function New-VMX
     )
     $VMXpath = Join-Path $Path $VMXName
     Write-Verbose $VMXpath
-    if (get-vmx -Path $VMXpath -WarningAction SilentlyContinue | Out-Null)
+    if (Get-VMX -Path $VMXpath -WarningAction SilentlyContinue | Out-Null)
     {
         Write-Warning "Vm Already Exists"
         break
@@ -5771,7 +5950,7 @@ function New-VMX
     $VMXConfig += 'firmware = "'+$Firmware+'"'
     $Config = Join-Path $VMXpath "$VMXName.vmx"
     $VMXConfig | Set-Content -Path $Config
-    $Object = New-Object -TypeName psobject
+    $Object = New-Object -TypeName PSObject
     $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
     $Object | Add-Member -MemberType NoteProperty -Name Type -Value $GuestOS
     $Object | Add-Member -MemberType NoteProperty -Name Config -Value $Config
@@ -5812,7 +5991,7 @@ function Wait-VMXuserloggedIn
         $testuser
     )
     Write-Host -ForegroundColor Gray -NoNewline " ==>waiting for user $whois logged in machine $machine"
-    $vmx = get-vmx $machine
+    $vmx = Get-VMX $machine
     do
     {
         $sleep = 1
@@ -5827,7 +6006,7 @@ function Wait-VMXuserloggedIn
     }
     until ($ProcInGuest -match $testuser)
     Write-Host	-ForegroundColor Green "[success]"
-    $Object = New-Object -TypeName psobject
+    $Object = New-Object -TypeName PSObject
     $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
     $Object | Add-Member -MemberType NoteProperty -Name Config -Value $Config
     $Object | Add-Member -MemberType NoteProperty -Name User -Value $testuser
