@@ -2,8 +2,9 @@
 # Modulmanifest für das Modul "vmxtoolkit"
 #
 # Generiert von: Karsten Bott
+# Additional modifications by: xilience
 #
-# Generiert am: 26.04.2014
+# Generiert am: 27.12.2019
 #
 @{
 # Die diesem Manifest zugeordnete Skript- oder Binärmoduldatei.
@@ -90,9 +91,7 @@ AliasesToExport = '*'
 # ModuleList = @()
 
 # Liste aller Dateien in diesem Modulpaket
-FileList = @("vmxtoolkitinit.ps1",
-"vmxtoolkit.psd1",
-"vmxtoolkit.psm1")
+FileList = @("vmxtoolkitinit.ps1","vmxtoolkit.psd1","vmxtoolkit.psm1")
 
 # Die privaten Daten, die an das in "RootModule/ModuleToProcess" angegebene Modul übergeben werden sollen.
 # PrivateData = ''
