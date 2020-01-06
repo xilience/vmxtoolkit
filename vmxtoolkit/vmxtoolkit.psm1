@@ -3256,16 +3256,8 @@ function Start-VMX
         Write-Verbose "$($MyInvocation.MyCommand): ParameterSetName - $($PsCmdlet.ParameterSetName)"
         switch ($PsCmdlet.ParameterSetName)
         {
-            "1"
-            {
-
-                $vmx = Get-VMX -VMXName $VMXname #-UUID $UUID
-            }
-
-            "3"
-            {
-                $vmx = Get-VMX -config $config
-            }
+            "1"  { $vmx = Get-VMX -VMXName $VMXname }
+            "3"  { $vmx = Get-VMX -config $config }
         }
 
         if ($VMX)
@@ -3273,7 +3265,6 @@ function Start-VMX
             Write-Verbose "$($MyInvocation.MyCommand): Testing VM $VMXname status"
             if (($vmx) -and ($vmx.state -ne "running"))
             {
-                #[int]$vmxhwversion = (Get-VMXHWVersion -config $vmx.config).hwversion
                 [int]$vmxhwversion = Get-VMXHWVersionString -config $vmx.config
                 if ($vmxHWversion -le $vmwareversion.major)
                 {
@@ -3291,53 +3282,13 @@ function Start-VMX
                     $content += 'guestinfo.vmwareversion = "' + $Global:vmwareversion + '"'
                     Set-Content -Path $vmx.config -Value $content -Force
                     Write-Verbose "$($MyInvocation.MyCommand): $vmxname starting..."
-                    #Write-Host -ForegroundColor Gray " ==>starting Virtual Machine " -NoNewline
-                    #Write-Host -ForegroundColor Magenta $VMX.vmxname -NoNewline
 
-                    $argumentList = ("start '" + $vmx.config + "'")
+
+                    $argumentList = ('start "' + $vmx.config + '"')
                     if ($nogui)  { $argumentList = $argumentList + " nogui" }
 
                     $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList -wait:(!$nowait)
 
-                    <#
-                    if ($nowait.IsPresent)
-                    {
-                        $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList -wait:$nowait
-                        Start-Process -FilePath $vmrun -ArgumentList $argumentList -NoNewWindow
-                        
-                        if ($nogui.IsPresent)
-                        {
-                            #Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui" -NoNewWindow
-                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui"
-                        }
-                        else
-                        {
-                            #Start-process -FilePath $vmrun -ArgumentList "start $($vmx.config) " -NoNewWindow
-                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config)"
-                        }
-                        
-                    }
-                    else
-                    {
-                        do
-                        {
-                            $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList
-                            
-                            if ($nogui.IsPresent)
-                            {
-                                #$cmdresult = & $vmrun start $vmx.config nogui #  2>&1 | Out-Null
-                                $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config) nogui"
-                            }
-                            else
-                            {
-                                $cmdresult = & $vmrun start $vmx.config #  2>&1 | Out-Null
-                                $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList "start $($vmx.config)"
-                            }
-                            
-                        }
-                        until ($VMrunErrorCondition -notcontains $cmdresult -or !$cmdresult)
-                    }
-                    #>
                     if ($result.ExitCode -eq 0)
                     {
                         Write-Verbose "$($MyInvocation.MyCommand): SUCCESS"
@@ -3456,7 +3407,8 @@ function Stop-VMX
 
             Write-Verbose "$($MyInvocation.MyCommand): $($vmx.config) stopping..."
 
-            $argumentList = "stop $($vmx.config) $Mode"
+            #$argumentList = "stop $($vmx.config) $Mode"
+            $argumentList = ('stop "' + $vmx.config + '" ' + $Mode + '')
             $result = Start-ProcessCapture -FilePath $vmrun -ArgumentList $argumentList
 
             if ($result.ExitCode -eq 0)
