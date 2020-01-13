@@ -3799,8 +3799,10 @@ function Connect-VMXcdromImage
             }
             else
             {
-                Write-Host -ForegroundColor Gray -NoNewline " ==> Configuring IDE $($Contoller)$($Port) on "
-                Write-Host -ForegroundColor Magenta -NoNewline $VMXName
+                #Write-Host -ForegroundColor Gray -NoNewline " ==> Configuring IDE $($Contoller)$($Port) on "
+                #Write-Host -ForegroundColor Magenta -NoNewline $VMXName
+                Write-Verbose " ==> Configuring IDE $($Contoller)$($Port) on "
+                Write-Verbose $VMXName
                 $Object = New-Object -TypeName PSObject
                 $Object | Add-Member -MemberType NoteProperty -Name VMXName -Value $VMXName
                 $Object | Add-Member -MemberType 'NoteProperty' -Name Config -Value $config
@@ -3822,7 +3824,8 @@ function Connect-VMXcdromImage
                     $Content += "$($Contoller)$($Port)"+'.startConnected = "FALSE"'
                 }
                 $Content | Set-Content -Path $config
-                Write-Host -ForegroundColor Green "[success]"
+                #Write-Host -ForegroundColor Green "[success]"
+                Write-Verbose "[success]"
                 $Object | Add-Member -MemberType 'NoteProperty' -Name Connected -Value $connect
                 Write-Output $Object
             }
@@ -4543,8 +4546,10 @@ function Invoke-VMXPowerShell
     process
     {
         $myscript = ".'$ScriptPath\$Script'"
-        Write-Host -ForegroundColor Gray " ==>starting '$Script $Parameter' on " -NoNewline
-        Write-Host -ForegroundColor Magenta $VMXName -NoNewline
+        #Write-Host -ForegroundColor Gray " ==>starting '$Script $Parameter' on " -NoNewline
+        Write-Verbose " ==>starting '$Script $Parameter' on "
+        #Write-Host -ForegroundColor Magenta $VMXName -NoNewline
+        Write-Verbose $VMXName
 
         do
         {
@@ -4582,7 +4587,8 @@ function Invoke-VMXPowerShell
             }
         }
         until ($Myresult -eq 1)
-        Write-Host  -ForegroundColor Green "[success]"
+        #Write-Host  -ForegroundColor Green "[success]"
+        Write-Verbose "[success]"
         Write-Verbose "Myresult: $Myresult"
         $Object = New-Object PSObject
         $Object | Add-Member -MemberType 'NoteProperty' -Name config -Value $config
